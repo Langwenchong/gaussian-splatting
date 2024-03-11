@@ -31,13 +31,17 @@ except ImportError:
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
+    # 读入基础点云初始化gaussian模型
     gaussians = GaussianModel(dataset.sh_degree)
+    # 结合相机信息与gaussian信息初始化场景
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
+    # 中途断点则恢复
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
+    # 背景颜色默认为黑色，否则白色
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
@@ -69,10 +73,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
+        # 逐渐增加sh的阶数
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
+        # 随机挑选一个要训练的角度，如果有现成的相机参数(因此需要初始图片的相机参数更好，这里就是使用colmap估计出来的)
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
@@ -83,10 +89,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
+        # 渲染这个当前训练时挑选的角度得到选然后的数据包
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        # Loss
+        # Loss回传优化
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
@@ -94,6 +101,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         iter_end.record()
 
+        # 接下来时处理部分，即记录日志，特定训练轮数的处理操作包括稠密化，opacity重置等
         with torch.no_grad():
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
@@ -112,13 +120,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Densification
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
+                # 还在稠密化区间则持续跟踪当前最大的gaussian尺寸
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
+                # 稠密化的轮数
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+                    # 如果还没有进行过一次opacity_rest则不进行稠密话因为此时可能还有大量不需要优化的gaussian此时对他们稠密化不合理
+                    # 否则稠密化，传入条件阈值以及当前场景的camera_extent和允许的最大的gaussian，因此半径大于20的直接不优化移除了太大了分裂没意义了
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
-                
+                # opacity reset
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
 
@@ -200,6 +212,7 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
+    # 计算metric与保存点云的轮数
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
@@ -211,9 +224,11 @@ if __name__ == "__main__":
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)
+    # 默认不存储训练的输出日志
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
+    # 尝试打开训练窗口
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)

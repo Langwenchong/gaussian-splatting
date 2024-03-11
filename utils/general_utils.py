@@ -26,6 +26,7 @@ def PILtoTorch(pil_image, resolution):
     else:
         return resized_image.unsqueeze(dim=-1).permute(2, 0, 1)
 
+# 保证学习率在指定区域按照指定的范围进行调整
 def get_expon_lr_func(
     lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
 ):
@@ -72,6 +73,7 @@ def strip_lowerdiag(L):
     uncertainty[:, 5] = L[:, 2, 2]
     return uncertainty
 
+# 正定，对称矩阵
 def strip_symmetric(sym):
     return strip_lowerdiag(sym)
 

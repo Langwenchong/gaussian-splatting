@@ -45,6 +45,7 @@ class Camera(nn.Module):
         else:
             self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
 
+        # 设置了近远距离区间
         self.zfar = 100.0
         self.znear = 0.01
 
@@ -52,8 +53,11 @@ class Camera(nn.Module):
         self.scale = scale
 
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
+        # 因此也是ndc方式截断视锥，因此gaussian表示的空间最远就是100而非无限远
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        # 投影矩阵，实际上就是MVP变换的近似
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        # 相机的成像中心
         self.camera_center = self.world_view_transform.inverse()[3, :3]
 
 class MiniCam:
@@ -66,6 +70,7 @@ class MiniCam:
         self.zfar = zfar
         self.world_view_transform = world_view_transform
         self.full_proj_transform = full_proj_transform
+        # 这个是相机坐标系到世界坐标系的变换矩阵
         view_inv = torch.inverse(self.world_view_transform)
         self.camera_center = view_inv[3][:3]
 

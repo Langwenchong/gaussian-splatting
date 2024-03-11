@@ -14,6 +14,7 @@ import math
 import numpy as np
 from typing import NamedTuple
 
+# 初始的点云只有这三项，后面gaussian_mocdel输出的ply则会有许多新的维度属性
 class BasicPointCloud(NamedTuple):
     points : np.array
     colors : np.array

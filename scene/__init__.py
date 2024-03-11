@@ -18,6 +18,7 @@ from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 
+# 主要是gaussian+相机，以及gaussian模型的存储读取操作
 class Scene:
 
     gaussians : GaussianModel
@@ -40,6 +41,7 @@ class Scene:
         self.train_cameras = {}
         self.test_cameras = {}
 
+        # 读入模型参数，并根据scene类型判断读取方法
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
@@ -47,18 +49,20 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
         else:
             assert False, "Could not recognize scene type!"
-
+        # 如果还没有gaussian_iter输出，则说明还没有训练过，则场景初始化为初始的点云
         if not self.loaded_iter:
             with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []
             camlist = []
+            # 读入训练和测试时不同视角的相机参数
             if scene_info.test_cameras:
                 camlist.extend(scene_info.test_cameras)
             if scene_info.train_cameras:
                 camlist.extend(scene_info.train_cameras)
             for id, cam in enumerate(camlist):
                 json_cams.append(camera_to_JSON(id, cam))
+            # 将所有相机的信息保存到cameras.json文件中
             with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
                 json.dump(json_cams, file)
 
@@ -66,6 +70,7 @@ class Scene:
             random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
             random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
 
+        # ？不知道在干什么。。。
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
         for resolution_scale in resolution_scales:
